@@ -13,6 +13,7 @@ const SEPARATION_INTENSITY: f32 = 1.0;
 const ALIGNMENT_INTENSITY: f32 = 1.0;
 const COHESION_INTENSITY: f32 = 1.0;
 const AVOIDANCE_INTENSITY: f32 = 1.0;
+const AVERSION_INTENSITY: f32 = 1.0;
 //Ideas for other sliders:
 // Aversion: how much boids avoid boids of other species, may be negative to induce "attraction"
 
@@ -87,7 +88,7 @@ pub fn spawn_boids(
     let mut random = rand::rng();
     for spec in species.iter() {
         //spawn a herd of this species
-        for _ in 0..200 {
+        for _ in 0..100 {
             let img = asset_server.load(spec.img_path.clone());
             let x: f32 = random.random_range(-WINDOW_WIDTH / 2.0..WINDOW_WIDTH / 2.0);
             let y: f32 = random.random_range(-WINDOW_HEIGHT / 2.0..WINDOW_HEIGHT / 2.0);
@@ -120,7 +121,7 @@ pub fn spawn_boids(
 pub fn define_species(mut commands: Commands) {
     let species1 = Species {
         img_path: PathBuf::from("textures\\boid.png"),
-        intensities: Vec4::new(2.0, 1.0, 1.0, 2.0),
+        intensities: vec![1.5, 2.0, 2.0, 2.0, -5.0].into(),
         vision_distance: 80.0,
         vision_angle: TAU - TAU / 2.0,
         speed_range: Vec2::new(0.1, 0.2),
@@ -131,7 +132,7 @@ pub fn define_species(mut commands: Commands) {
 
     let species2 = Species {
         img_path: PathBuf::from("textures\\boid2.png"),
-        intensities: Vec4::new(1.0, 1.0, 1.0, 1.0),
+        intensities: vec![1.0, 0.2, 0.2, 1.0, 5.0].into(),
         vision_distance: 60.0,
         vision_angle: TAU - TAU / 3.0,
         speed_range: Vec2::new(4., 10.),
@@ -171,25 +172,33 @@ pub fn update_boids(commands: Commands, mut boids: Query<(&mut Boid, &mut Transf
         let mut separation = Vec2::ZERO;
         let mut alignment = Vec2::ZERO;
         let mut cohesion = Vec2::ZERO;
+        let mut avoidance = Vec2::ZERO;
 
         for (b2, tr2) in visible_boids.iter() {
             let distance = tr1.translation.distance(tr2.translation);
             let direction = tr2.translation - tr1.translation;
             let direction = direction.normalize();
             
+            
+            //avoidance, apply separation again but only to boids of a different species
+            if b1.species != b2.species {
+                avoidance -= Vec2::new(direction.x, direction.y) / (distance / VISION_DISTANCE);
+            }
             //separation
             separation -= Vec2::new(direction.x, direction.y) / (distance / VISION_DISTANCE);
-            
+
             //check if boid is the same species as the current boid, if not continue, boids only care to align and cohese with their own species just want to avoid running into anything else
             if b1.species != b2.species {
                 continue;
             }
+            
 
             //alignment
             alignment += b2.velocity;
 
             //cohesion
             cohesion += Vec2::new(direction.x, direction.y);
+
         }
         //avoidance
         //avoidance is a special case of separation, we will adjust velocity based on the inverse square of the normalized distance to the wall
@@ -211,10 +220,11 @@ pub fn update_boids(commands: Commands, mut boids: Query<(&mut Boid, &mut Transf
 
         //apply separation, alignment, cohesion, and avoidance intensities
         if let Some(spec) = &b1.species {
-            separation *= spec.intensities.x;
-            alignment *= spec.intensities.y;
-            cohesion *= spec.intensities.z;
-            avoidance *= spec.intensities.w;
+            separation *= spec.intensities[0];
+            alignment *= spec.intensities[1];
+            cohesion *= spec.intensities[2];
+            avoidance *= spec.intensities[3];
+
         } else {
             separation *= SEPARATION_INTENSITY;
             alignment *= ALIGNMENT_INTENSITY;
@@ -243,20 +253,20 @@ pub fn update_boids(commands: Commands, mut boids: Query<(&mut Boid, &mut Transf
         //move boid by its velocity
         tr1.translation += b1.velocity.extend(0.0);
 
-        //if boid goes off screen, wrap around and then some, screen centered at 0,0,
-        //use some padding so we don't clip back every frame,
-        //boids velocity is not affected by wrapping so they can still move off screen a bit but wont be clipped back immediately because they are placed exactly on the screen again
-        let padding = 5.0;
-        if tr1.translation.x > WINDOW_WIDTH / 2.0 + padding {
-            tr1.translation.x = -WINDOW_WIDTH / 2.0;
-        } else if tr1.translation.x < -WINDOW_WIDTH / 2.0 - padding {
-            tr1.translation.x = WINDOW_WIDTH / 2.0;
-        }
-        if tr1.translation.y > WINDOW_HEIGHT / 2.0 + padding {
-            tr1.translation.y = -WINDOW_HEIGHT / 2.0;
-        } else if tr1.translation.y < -WINDOW_HEIGHT / 2.0 - padding {
-            tr1.translation.y = WINDOW_HEIGHT / 2.0;
-        }
+        // //if boid goes off screen, wrap around and then some, screen centered at 0,0,
+        // //use some padding so we don't clip back every frame,
+        // //boids velocity is not affected by wrapping so they can still move off screen a bit but wont be clipped back immediately because they are placed exactly on the screen again
+        // let padding = 5.0;
+        // if tr1.translation.x > WINDOW_WIDTH / 2.0 + padding {
+        //     tr1.translation.x = -WINDOW_WIDTH / 2.0;
+        // } else if tr1.translation.x < -WINDOW_WIDTH / 2.0 - padding {
+        //     tr1.translation.x = WINDOW_WIDTH / 2.0;
+        // }
+        // if tr1.translation.y > WINDOW_HEIGHT / 2.0 + padding {
+        //     tr1.translation.y = -WINDOW_HEIGHT / 2.0;
+        // } else if tr1.translation.y < -WINDOW_HEIGHT / 2.0 - padding {
+        //     tr1.translation.y = WINDOW_HEIGHT / 2.0;
+        // }
     });
 }
 
@@ -289,7 +299,7 @@ impl Tail {
 #[derive(Component, Debug, Clone, PartialEq)]
 pub struct Species {
     img_path: PathBuf,
-    intensities: Vec4, //se, al, co, av
+    intensities: Vec<f32>, //se, al, co, av
     vision_distance: f32,
     vision_angle: f32,
     speed_range: Vec2, //min, max
